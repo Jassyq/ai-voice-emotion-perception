@@ -3,3 +3,9 @@ soundfile>=0.12.0
 numpy
 pandas
 pytest>=7.0.0
+# Analysis pipeline (run_analysis.py)
+statsmodels>=0.14.0
+scikit-learn>=1.3.0
+matplotlib>=3.7.0
+# Optional: pip install xgboost (may need `brew install libomp` on macOS)
+scipy>=1.11.0

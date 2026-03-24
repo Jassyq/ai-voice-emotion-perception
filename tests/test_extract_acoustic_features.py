@@ -2,9 +2,12 @@
 Unit tests for audio feature extraction.
 Uses PyTest and mocked inputs for isolated testing (no real audio files).
 """
+import pytest
+
+pytest.importorskip("librosa")
+
 import numpy as np
 import pandas as pd
-import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 

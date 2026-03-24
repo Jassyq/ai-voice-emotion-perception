@@ -13,7 +13,7 @@ import pandas as pd
 try:
     import librosa
 except ImportError:
-    raise SystemExit("Install librosa: pip install librosa soundfile")
+    librosa = None  # type: ignore[misc, assignment]
 
 SR = 22050
 HOP = 512
@@ -34,6 +34,9 @@ def extract_features_from_audio(
     filename: Optional[str] = None,
 ) -> dict:
     """Extract acoustic features from raw audio arrays (for batch use and testing)."""
+    if librosa is None:
+        raise ImportError("Install librosa: pip install librosa soundfile")
+
     filename = filename or f"{clip_id}.mp3"
 
     duration_s = librosa.get_duration(y=y, sr=sr)
@@ -101,6 +104,9 @@ def extract_features_from_audio(
 
 def extract_features(audio_path: Path) -> dict:
     """Load one audio file and extract per-clip acoustic features."""
+    if librosa is None:
+        raise ImportError("Install librosa: pip install librosa soundfile")
+
     y, sr = librosa.load(str(audio_path), sr=SR, mono=True)
     return extract_features_from_audio(
         y, sr,
@@ -136,6 +142,9 @@ def validate_output(df: pd.DataFrame) -> tuple[bool, list[str]]:
 
 
 def main():
+    if librosa is None:
+        raise SystemExit("Install librosa: pip install librosa soundfile")
+
     parser = argparse.ArgumentParser(description="Extract acoustic features from audio (batch + validation).")
     parser.add_argument("--clips-dir", type=Path, default=None, help="Folder containing .mp3 files (default: ./clips)")
     parser.add_argument("--out", type=Path, default=None, help="Output CSV path (default: ./acoustic_features.csv)")
