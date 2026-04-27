@@ -67,20 +67,24 @@ def _feature_columns(df: pd.DataFrame) -> list[str]:
 
 def _make_classifier(random_state: int, use_xgb: bool) -> Any:
     if use_xgb and _HAS_XGB:
+        # Tuned for tabular acoustics: shallow defaults under-fit duplicate X rows
+        # (same clip features, different raters). Deeper trees better approximate
+        # per-clip label modes on the training participants.
         return XGBClassifier(
-            n_estimators=120,
-            max_depth=5,
-            learning_rate=0.1,
-            subsample=0.9,
-            colsample_bytree=0.9,
+            n_estimators=500,
+            max_depth=9,
+            learning_rate=0.06,
+            subsample=0.85,
+            colsample_bytree=0.85,
             random_state=random_state,
             n_jobs=-1,
             eval_metric="mlogloss",
+            tree_method="hist",
         )
     return HistGradientBoostingClassifier(
-        max_iter=150,
-        max_depth=6,
-        learning_rate=0.08,
+        max_iter=250,
+        max_depth=8,
+        learning_rate=0.06,
         random_state=random_state,
     )
 
@@ -144,15 +148,59 @@ def train_emotion_classifier(
         )
 
     clf = _make_classifier(random_state, use_xgb)
-    clf.fit(X_train, y_train)
-    y_pred = clf.predict(X_test)
-    acc = accuracy_score(y_test, y_pred)
+    # XGBoost can fail if y_train labels are not contiguous (e.g., a class is
+    # missing in the training split). If that happens, remap labels based on
+    # what appears in y_train, and drop test rows whose labels are not in
+    # training.
+    le_used = le
+    X_test_used = X_test
+    y_test_used = y_test
+    y_train_used = y_train
+    if use_xgb and _HAS_XGB:
+        unique_train = np.unique(y_train)
+        expected = np.arange(len(unique_train))
+        if not np.array_equal(unique_train, expected):
+            mapping = {int(old): int(i) for i, old in enumerate(unique_train.tolist())}
+            y_train_used = np.array([mapping[int(v)] for v in y_train], dtype=int)
+            keep_mask = np.isin(y_test, unique_train)
+            X_test_used = X_test[keep_mask]
+            y_test_used = np.array([mapping[int(v)] for v in y_test[keep_mask]], dtype=int)
+            le_used = LabelEncoder()
+            le_used.classes_ = np.array(le.classes_[unique_train], dtype=object)
+
+    clf.fit(X_train, y_train_used)
+    y_pred = clf.predict(X_test_used)
+    acc = accuracy_score(y_test_used, y_pred)
+
+    # Diagnostic: on this split, accuracy if we always predicted the training-set
+    # majority emotion for each clip stem. Acoustics map 1:1 to stems in this study,
+    # so this approximates an upper bound for clip-only inputs when raters disagree.
+    majority_baseline_acc: float | None = None
+    if group_col and group_col in df.columns and "stem" in df.columns:
+        stems_all = df.loc[X.index, "stem"].astype(str).values
+        y_labels_all = le.inverse_transform(y).astype(str)
+        st_tr = stems_all[train_idx]
+        lab_tr = y_labels_all[train_idx]
+        mode_by_stem: dict[str, str] = {}
+        for s in np.unique(st_tr):
+            m = lab_tr[st_tr == s]
+            vals, counts = np.unique(m, return_counts=True)
+            mode_by_stem[str(s)] = str(vals[int(np.argmax(counts))])
+        fallback = str(pd.Series(lab_tr).mode().iloc[0])
+        st_te = stems_all[test_idx]
+        if use_xgb and _HAS_XGB:
+            utr = np.unique(y_train)
+            if not np.array_equal(utr, np.arange(len(utr))):
+                st_te = st_te[np.isin(y_test, utr)]
+        lab_te = le_used.inverse_transform(y_test_used).astype(str)
+        pred_maj = np.array([mode_by_stem.get(st_te[i], fallback) for i in range(len(st_te))])
+        majority_baseline_acc = float(np.mean(pred_maj == lab_te))
 
     report = classification_report(
-        y_test,
+        y_test_used,
         y_pred,
-        labels=np.arange(len(le.classes_)),
-        target_names=le.classes_,
+        labels=np.arange(len(le_used.classes_)),
+        target_names=le_used.classes_,
         zero_division=0,
     )
 
@@ -160,17 +208,18 @@ def train_emotion_classifier(
 
     metrics: dict[str, Any] = {
         "accuracy": float(acc),
-        "n_train": int(len(y_train)),
-        "n_test": int(len(y_test)),
-        "n_classes": int(len(le.classes_)),
-        "classes": list(le.classes_),
+        "n_train": int(len(y_train_used)),
+        "n_test": int(len(y_test_used)),
+        "n_classes": int(len(le_used.classes_)),
+        "classes": list(le_used.classes_),
         "classification_report": report,
         "feature_names": feats,
         "backend": backend,
         "split": split_note,
+        "majority_baseline_acc": majority_baseline_acc,
     }
 
-    return clf, le, metrics, y_test, y_pred
+    return clf, le_used, metrics, y_test_used, y_pred
 
 
 def plot_confusion_matrix_png(
@@ -242,6 +291,7 @@ def run_xgb_pipeline(
     random_state: int = 42,
     use_xgb: bool = False,
     group_col: str = "response_id",
+    test_size: float = 0.25,
 ) -> str:
     """Train model for perceived_emotion, save plots, return markdown section."""
     clf, le, metrics, y_test, y_pred = train_emotion_classifier(
@@ -250,6 +300,7 @@ def run_xgb_pipeline(
         random_state=random_state,
         use_xgb=use_xgb,
         group_col=group_col,
+        test_size=test_size,
     )
 
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -266,6 +317,15 @@ def run_xgb_pipeline(
         f"- **Accuracy (test):** {metrics['accuracy']:.3f}",
         f"- **Train / test clips:** {metrics['n_train']} / {metrics['n_test']}",
         f"- **Classes:** {metrics['n_classes']} ({', '.join(metrics['classes'])})\n",
+    ]
+    mb = metrics.get("majority_baseline_acc")
+    if mb is not None:
+        lines.append(
+            f"- **Reference (train majority emotion per clip):** {mb:.3f} — "
+            "approximate ceiling for models that only see clip-level inputs, because the same "
+            "acoustics receive different emotion labels from different participants.\n"
+        )
+    lines += [
         "### Classification report (test)\n",
         "```\n" + metrics["classification_report"] + "\n```\n",
         "![Confusion matrix](xgb_confusion_matrix.png)\n",
@@ -283,6 +343,7 @@ def run_label_pipeline(
     file_prefix: str,
     random_state: int = 42,
     use_xgb: bool = False,
+    test_size: float = 0.25,
 ) -> str:
     """Generic pipeline for any label column."""
     clf, le, metrics, y_test, y_pred = train_emotion_classifier(
@@ -291,6 +352,7 @@ def run_label_pipeline(
         random_state=random_state,
         use_xgb=use_xgb,
         group_col="stem",
+        test_size=test_size,
     )
     results_dir.mkdir(parents=True, exist_ok=True)
     cm_file = f"{file_prefix}_confusion_matrix.png"

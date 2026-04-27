@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import html as html_mod
 import sys
+import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -21,7 +22,8 @@ if str(_ROOT) not in sys.path:
 
 import pandas as pd
 
-from analysis.ml_emotion_xgb import run_label_pipeline, run_xgb_pipeline
+from analysis.descriptive_figures import write_descriptive_figures
+from analysis.ml_emotion_xgb import run_xgb_pipeline
 from analysis.stats_models import run_all_mixedlm
 
 
@@ -49,12 +51,15 @@ def _write_html(md_path: Path, html_path: Path, title: str) -> None:
     # Append markdown as readable pre
     simple += "<pre>" + html_mod.escape(md_text) + "</pre>\n"
     simple += "<h2>Figures</h2>\n"
-    simple += '<p><img src="xgb_confusion_matrix.png" alt="Perceived confusion matrix"/></p>\n'
-    simple += '<p><img src="xgb_feature_importance.png" alt="Perceived feature importance"/></p>\n'
-    simple += '<p><img src="true_tone_confusion_matrix.png" alt="True tone confusion matrix"/></p>\n'
-    simple += '<p><img src="true_tone_feature_importance.png" alt="True tone feature importance"/></p>\n'
-    simple += '<p><img src="true_words_confusion_matrix.png" alt="True words confusion matrix"/></p>\n'
-    simple += '<p><img src="true_words_feature_importance.png" alt="True words feature importance"/></p>\n'
+    for src, alt in [
+        ("fig_ratings_by_design_cell.png", "Mean ratings by design cell"),
+        ("fig_perceived_by_design_cell.png", "Perceived emotion by design cell"),
+        ("fig_intended_vs_perceived_heatmap.png", "Intended vs perceived heatmap"),
+        ("fig_clips_per_participant.png", "Clips per participant"),
+        ("xgb_confusion_matrix.png", "Perceived confusion matrix"),
+        ("xgb_feature_importance.png", "Perceived feature importance"),
+    ]:
+        simple += f'<p><img src="{html_mod.escape(src)}" alt="{html_mod.escape(alt)}"/></p>\n'
     simple += "</body></html>"
     html_path.write_text(simple, encoding="utf-8")
 
@@ -82,6 +87,13 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    warnings.filterwarnings(
+        "ignore",
+        message="Random effects covariance is singular",
+        category=UserWarning,
+        module="statsmodels.regression.mixed_linear_model",
+    )
+
     if not args.csv.is_file():
         raise SystemExit(f"Input not found: {args.csv}")
 
@@ -90,6 +102,11 @@ def main() -> None:
 
     sections: list[str] = []
     sections.append(f"# Analysis report\n\n**Input:** `{args.csv.name}`  \n**Rows:** {len(df)}\n")
+
+    try:
+        sections.append(write_descriptive_figures(df, args.out))
+    except Exception as e:
+        sections.append(f"## Descriptive figures (skipped)\n\n`{e}`\n")
 
     # Stats
     md_stats, _diag = run_all_mixedlm(df)
@@ -108,26 +125,6 @@ def main() -> None:
     except Exception as e:
         ml_md = f"## XGBoost (skipped or failed)\n\n`{e}`\n"
     sections.append(ml_md)
-
-    # True/intended label models
-    for target_col, title, prefix in [
-        ("intended_tone", "Supervised learning: true clip tone from acoustics", "true_tone"),
-        ("intended_words", "Supervised learning: true clip words-emotion from acoustics", "true_words"),
-    ]:
-        try:
-            sections.append(
-                run_label_pipeline(
-                    df,
-                    args.out,
-                    target_col=target_col,
-                    title=title,
-                    file_prefix=prefix,
-                    random_state=args.seed,
-                    use_xgb=args.use_xgb,
-                )
-            )
-        except Exception as e:
-            sections.append(f"## {title} (skipped or failed)\n\n`{e}`\n")
 
     summary_md = "\n\n".join(sections)
     md_path = args.out / "summary.md"

@@ -2,6 +2,8 @@
 Parse Qualtrics survey export into long-format ratings (one row per clip × participant).
 Joins with stimulus_groups.FORM_GROUPS so each rating is tied to filename, tone, and word content.
 Uses stdlib only for portability (merge optional acoustic CSV without pandas).
+
+CLI default: include partial responses (Finished=False); pass --finished-only for completers only.
 """
 from __future__ import annotations
 
@@ -228,9 +230,9 @@ def main() -> None:
         help="Output path (default: survey_long_ratings.csv next to input)",
     )
     parser.add_argument(
-        "--include-incomplete",
+        "--finished-only",
         action="store_true",
-        help="Include rows where Finished is not True",
+        help="Only include rows where Qualtrics Finished is True (default: include partial responses)",
     )
     parser.add_argument(
         "--acoustic",
@@ -241,7 +243,7 @@ def main() -> None:
     args = parser.parse_args()
 
     out_path = args.out or (args.survey_csv.parent / "survey_long_ratings.csv")
-    rows = parse_qualtrics_export(args.survey_csv, only_finished=not args.include_incomplete)
+    rows = parse_qualtrics_export(args.survey_csv, only_finished=args.finished_only)
     if args.acoustic:
         rows = merge_with_acoustic(rows, args.acoustic)
     write_csv(rows, out_path)

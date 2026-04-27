@@ -48,7 +48,7 @@ In your current data:
 
 - Overall mean `tone_vs_words` = **3.373** (leans toward tone over words)
 - By condition:
-  - `tone_emotional_word_neutral`: **3.655** (strongest tone-lean)
+  - `tone_emotional_word_neutral`: **3.655** (stronge st tone-lean)
   - `tone_emotional_word_emotional`: **3.444**
   - `tone_neutral_word_neutral`: **3.292**
   - `tone_neutral_word_emotional`: **2.982** (roughly balanced / slight words lean)
