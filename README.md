@@ -5,7 +5,7 @@ Halıcıoğlu Data Science Institute, UC San Diego
 
 ---
 
-[![Poster Preview](docs/poster_thumbnail.png)](docs/poster.pdf)
+[![Poster Preview](docs/poster_thumbnail.png)](poster/poster.pdf)
 > *Click to view the full UGS research poster.*
 
 ---
