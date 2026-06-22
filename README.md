@@ -5,7 +5,7 @@ Halıcıoğlu Data Science Institute, UC San Diego
 
 ---
 
-[![Poster Preview](docs/UGS Poster Presentation - Michael Luo, Jiahe Qin.pptx)](poster/poster.pdf)
+[![Poster Preview](poster/presentation.pdf)](poster/poster.pdf)
 > *Click to view the full UGS research poster.*
 
 ---
